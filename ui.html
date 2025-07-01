@@ -15,12 +15,12 @@
         }
 
         .message.bot pre {
-            background-color: #2d2d2d; /* Ciemne tło dla kodu */
-            color: #f8f8f2;           /* Jasny tekst */
+            background-color: #2d2d2d;
+            color: #f8f8f2;
             padding: 12px;
             border-radius: 8px;
-            overflow-x: auto;         /* Umożliwia przewijanie w poziomie */
-            white-space: pre;      /* Zachowuje białe znaki i zawija wiersze */
+            overflow-x: auto;
+            white-space: pre;
             word-wrap: break-word;
         }
 
@@ -172,7 +172,7 @@
             border-bottom-left-radius: 4px;
         }
 
-        /* --- Loader (wskaźnik ładowania) --- */
+        /* --- Loader --- */
         .loader {
             align-self: flex-start;
         }
@@ -238,9 +238,6 @@
         #send-button:hover {
             background-color: #005ecb;
         }
-        
-        /* ZMIANA: Usunięto style dla .typing-cursor i @keyframes blink */
-
     </style>
 </head>
 <body>
@@ -267,16 +264,13 @@
         </div>
     </div>
     <script>
-        // --- Referencje do elementów HTML ---
         const form = document.getElementById('input-form');
         const input = document.getElementById('prompt-input');
         const messagesContainer = document.getElementById('messages-container');
         let currentChatId = null;
         let chats = [];
         let editingChatId = null;
-        // ZMIANA: Usunięto 'activeBotMessageElement'
 
-        // --- Obsługa odpowiedzi z code.ts (uproszczona) ---
         window.addEventListener('message', (event) => {
             if (event.data.pluginMessage) {
                 const msg = event.data.pluginMessage;
@@ -284,11 +278,9 @@
                     chats = msg.data || [];
                     renderChatList();
                 } else if (msg.type === 'response') {
-                    // ZMIANA: Ta wiadomość obsługuje teraz zarówno pełne odpowiedzi AI, jak i błędy.
                     hideLoader();
                     addMessage(msg.data, 'bot');
                 }
-                // ZMIANA: Usunięto obsługę 'responseChunk' i 'streamEnd'
             }
         });
 
@@ -312,14 +304,33 @@
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             const promptText = input.value.trim();
-            if (promptText) {
-                // ZMIANA: Wiadomość użytkownika jest dodawana i zapisywana od razu
-                addMessage(promptText, 'user'); 
-                input.value = '';
-                input.style.height = 'auto';
-                showLoader();
-                parent.postMessage({ pluginMessage: { type: 'prompt', data: promptText } }, '*');
+            if (!promptText) return;
+
+            await addMessage(promptText, 'user');
+
+            input.value = '';
+            input.style.height = 'auto';
+            showLoader();
+
+            const currentChat = chats.find(c => c.id === currentChatId);
+            let historyForAPI = [];
+
+            if (currentChat && currentChat.messages.length > 1) {
+                historyForAPI = currentChat.messages.slice(0, -1).map(m => ({
+                    role: m.type === 'user' ? 'user' : 'model',
+                    parts: [{ text: m.text }]
+                }));
             }
+
+            parent.postMessage({ 
+                pluginMessage: { 
+                    type: 'prompt', 
+                    data: {
+                        prompt: promptText,
+                        history: historyForAPI
+                    } 
+                } 
+            }, '*');
         });
 
         // --- Funkcja do renderowania wiadomości w UI ---
@@ -337,12 +348,9 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // --- ZMIANA: Uproszczona funkcja do dodawania wiadomości do historii i UI ---
         async function addMessage(text, type) {
-            // Zawsze renderuj wiadomość w UI
             renderMessage(text, type); 
 
-            // Logika zapisu do historii
             if (type === 'user') {
                 if (!currentChatId) {
                     currentChatId = createChatId();
@@ -472,7 +480,6 @@
             currentChatId = null;
             editingChatId = null;
             messagesContainer.innerHTML = '';
-            // Dodajemy powitalną wiadomość bez zapisywania jej w historii
             renderMessage('Cześć! Opisz design, który chcesz stworzyć, a ja postaram się go dla Ciebie wygenerować.', 'bot');
             renderChatList();
         }

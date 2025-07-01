@@ -1,12 +1,11 @@
-// Uruchomienie interfejsu użytkownika wtyczki
+import icons from "../icons.json";
+
 figma.showUI(__html__, { width: 1000, height: 600 });
 
-// Klucz API i URL z zmiennych środowiskowych
 const GEMINI_API_KEY = process.env.API_KEY;
-// ZMIANA: Upewnij się, że ten URL wskazuje na bazowy adres modelu, np. "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro-latest"
-const GEMINI_API_URL = process.env.API_URL; 
+const GEMINI_API_URL = process.env.API_URL;
+const LUCIDE_ICON_NAMES = icons;
 
-// Interfejsy
 interface GeminiResponse {
   candidates?: Array<{ content?: { parts?: Array<{ text: string }> } }>;
   error?: { message: string };
@@ -40,18 +39,10 @@ interface UIComponent {
   iconType?: string;
 }
 
-// Główny handler wiadomości od UI
-figma.ui.onmessage = async (msg: { type: string; data?: any }) => {
-  if (msg.type === "loadChats") {
-    const chats = (await figma.clientStorage.getAsync("chat-history")) || [];
-    figma.ui.postMessage({ type: "loadedChats", data: chats });
-  } else if (msg.type === "saveChats") {
-    await figma.clientStorage.setAsync("chat-history", msg.data);
-  } else if (msg.type === "prompt") {
-    const promptText = `Użytkownik chce wygenerować interfejs. Treść żądania: ${msg.data} 
-    
-    Działasz jako precyzyjny translator poleceń na specjalistyczny format do generowania interfejsu użytkownika. Twoim jedynym zadaniem jest konwersja poniższego polecenia na hierarchiczny opis UI, bez żadnych dodatkowych komentarzy i wyjaśnień.
-          
+const systemInstruction = {
+  parts: [{
+    text: `Działasz jako precyzyjny translator poleceń na specjalistyczny format do generowania interfejsu użytkownika. Twoim jedynym zadaniem jest konwersja poleceń na hierarchiczny opis UI, bez żadnych dodatkowych komentarzy i wyjaśnień.
+
 **ZASADY GŁÓWNE (NAJWAŻNIEJSZE)**
 
 1.  **Zero Komentarzy:** Odpowiadaj TYLKO i WYŁĄCZNIE kodem wewnątrz tagów "<design>". Nie dodawaj żadnych słów przed ani po tagach.
@@ -96,21 +87,45 @@ V "Card" hug hug p:24 gap:16 br:12 fill:#2C2C2EFF s:#333333FF sw:1
   H "Button" hug 44 p:0,20,0,20 a:c j:c gap:8 br:8 fill:#007BFFFF
     K "Icon" 16 16 fill:#FFFFFFFF "log-in"
     T "Label" hug hug font:"Inter" fw:600 fs:14 fill:#FFFFFFFF "Sign In"
-</design>`;
+</design>`
+  }]
+};
+
+// Główny handler wiadomości od UI
+figma.ui.onmessage = async (msg: { type: string; data?: any }) => {
+  if (msg.type === "loadChats") {
+    const chats = (await figma.clientStorage.getAsync("chat-history")) || [];
+    figma.ui.postMessage({ type: "loadedChats", data: chats });
+  } else if (msg.type === "saveChats") {
+    await figma.clientStorage.setAsync("chat-history", msg.data);
+  } else if (msg.type === "prompt") {
+    const { prompt, history } = msg.data as { 
+      prompt: string; 
+      history: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }>;
+    };
+
+    // Dołącz nową wiadomość użytkownika do historii
+    const newUserMessage = { role: 'user', parts: [{ text: prompt }] };
+    const apiContents = [...history, newUserMessage];
 
     try {
       if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY") {
         throw new Error("Brak klucza API Gemini. Ustaw zmienną środowiskową API_KEY.");
       }
 
-      // ZMIANA: Użycie standardowego punktu końcowego 'generateContent' zamiast strumieniowania ('streamGenerateContent?alt=sse')
+      // Zawsze dołączaj instrukcję systemową do zapytania
+      const requestBody = { 
+        contents: apiContents,
+        system_instruction: systemInstruction 
+      };
+
       const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ "text": promptText }] }] })
+        body: JSON.stringify(requestBody)
       });
 
-      console.log("Wysłano zapytanie do Gemini API:", promptText);
+      console.log("Wysłano zapytanie do Gemini API:", JSON.stringify(requestBody, null, 2));
       console.log("Odpowiedź API:", response.status, response.statusText);
 
       if (!response.ok) {
@@ -119,14 +134,13 @@ V "Card" hug hug p:24 gap:16 br:12 fill:#2C2C2EFF s:#333333FF sw:1
         throw new Error(`Błąd API Gemini: ${errorMessage}`);
       }
 
-      // ZMIANA: Bezpośrednie sparsowanie całej odpowiedzi JSON
       const responseData = await response.json() as GeminiResponse;
       const fullBotResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text || "AI nie zwróciło żadnej treści. Spróbuj ponownie.";
 
-      // ZMIANA: Wysłanie pełnej odpowiedzi do UI za jednym razem
+      console.log("Odpowiedź AI:\n", fullBotResponse);
+
       figma.ui.postMessage({ type: "response", data: fullBotResponse });
 
-      // Parsowanie i generowanie designu odbywa się po otrzymaniu pełnej odpowiedzi
       const designMatch = fullBotResponse.match(/<design>([\s\S]*?)<\/design>/);
       if (designMatch && designMatch[1]) {
         const designContent = designMatch[1].trim();
@@ -142,7 +156,6 @@ V "Card" hug hug p:24 gap:16 br:12 fill:#2C2C2EFF s:#333333FF sw:1
     } catch (error: any) {
       console.error("Błąd:", error);
       const errorMessage = error && error.message ? error.message : "Nieznany błąd";
-      // ZMIANA: Wysłanie pojedynczej wiadomości o błędzie, bez 'streamEnd'
       figma.ui.postMessage({ type: "response", data: `Wystąpił błąd: ${errorMessage}` });
     }
   }
@@ -251,26 +264,78 @@ function parseUIInstructions(response: string): UIComponent[] {
   return components;
 }
 
+
+function levenshteinDistance(a: string, b: string): number {
+  const an = a ? a.length : 0;
+  const bn = b ? b.length : 0;
+  if (an === 0) return bn;
+  if (bn === 0) return an;
+  const matrix = Array(bn + 1);
+  for (let i = 0; i <= bn; ++i) matrix[i] = [i];
+  const firstRow = [];
+  for (let j = 0; j <= an; ++j) firstRow[j] = j;
+  matrix[0] = firstRow;
+  for (let i = 1; i <= bn; ++i) {
+    for (let j = 1; j <= an; ++j) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+        );
+      }
+    }
+  }
+  return matrix[bn][an];
+}
+
+function findClosestIconName(name: string): string {
+  if (LUCIDE_ICON_NAMES.includes(name)) {
+    return name;
+  }
+
+  let bestMatch = name;
+  let minDistance = Infinity;
+
+  for (const iconName of LUCIDE_ICON_NAMES) {
+    const distance = levenshteinDistance(name, iconName);
+    if (distance < minDistance) {
+      minDistance = distance;
+      bestMatch = iconName;
+    }
+  }
+
+  if (minDistance > name.length * 0.6) {
+      console.warn(`Nie znaleziono dobrego dopasowania dla ikony "${name}". Używam oryginalnej nazwy, co może spowodować błąd.`);
+      return name; 
+  }
+
+  console.log(`Automatyczna korekta nazwy ikony: "${name}" -> "${bestMatch}" (dystans: ${minDistance})`);
+  return bestMatch;
+}
+
 async function generateDesign(components: UIComponent[]) {
   const nodes: SceneNode[] = [];
 
   async function renderComponent(component: UIComponent, parentNode?: FrameNode): Promise<SceneNode | null> {
-    
     if (component.type === 'K') {
       if (!component.iconType) {
         console.warn('Pominięto ikonę bez nazwy (iconType).');
         return null; 
       }
 
-      const iconName = component.iconType.toLowerCase();
-      const iconUrl = `https://cdn.jsdelivr.net/npm/lucide-static/icons/${iconName}.svg`;
+      const correctedIconName = findClosestIconName(component.iconType.toLowerCase());
+      const iconUrl = `https://cdn.jsdelivr.net/npm/lucide-static/icons/${correctedIconName}.svg`;
 
       try {
         const response = await fetch(iconUrl);
         if (!response.ok) {
-          throw new Error(`Nie znaleziono ikony: ${iconName}`);
+          throw new Error(`Nie znaleziono ikony: ${correctedIconName}`);
         }
+
         const svgContent = await response.text();
+        console.log(`svgContent: ${svgContent}`)
         const node = figma.createNodeFromSvg(svgContent);
         
         node.name = component.name || component.iconType;
@@ -281,7 +346,15 @@ async function generateDesign(components: UIComponent[]) {
 
         if (component.fill && typeof component.fill === 'string') {
           const { r, g, b, a } = parseColor(component.fill);
-          node.fills = [{ type: 'SOLID', color: { r, g, b }, opacity: a }];
+
+          for (const child of node.children) {
+            if (child.type === 'VECTOR') {
+              child.fills = [];
+              child.strokes = [{ type: 'SOLID', color: { r, g, b }, opacity: a}];
+              child.strokeWeight = 1.67;
+            }
+          }
+          console.log(`Ustawiono kolor wypełnienia ikony: ${component.fill}`);
         }
         
         if (component.opacity !== undefined) node.opacity = component.opacity;
@@ -304,6 +377,7 @@ async function generateDesign(components: UIComponent[]) {
 
       } catch (error: any) {
         console.error(`Błąd ładowania ikony: ${error.message}. Tworzę placeholder.`);
+        console.log(`Payload: ${iconUrl}`)
         const fallbackNode = figma.createFrame();
         fallbackNode.name = `(Błąd) ${component.name}`;
         const size = typeof component.width === 'number' ? component.width : 24;
