@@ -1,0 +1,9 @@
+<design> 
+V "Buttons" fill hug gap:8 
+    H "Button 1" fill 48 #007BFF a:c j:c br:8 
+        T "Button 1" hug hug #FFFFFF "Roboto" 500 16 
+    H "Button 2" fill 48 #007BFF a:c j:c br:8 
+        T "Button 2" hug hug #FFFFFF "Roboto" 500 16 
+    H "Button 3" fill 48 #007BFF a:c j:c br:8 
+        T "Button 3" hug hug #FFFFFF "Roboto" 500 16 
+</design>
