@@ -91,9 +91,29 @@ V "Card" hug hug p:24 gap:16 br:12 fill:#2C2C2EFF s:#333333FF sw:1
   }]
 };
 
+// restore previous size
+figma.clientStorage.getAsync('size').then(size => {
+  if(size) figma.ui.resize(size.w,size.h);
+}).catch(err=>{});
+
+figma.ui.onmessage = msg => {
+  console.log("Received:", msg);
+  switch (msg.type) {
+    case "resize":
+      figma.ui.resize(msg.size.w,msg.size.h);      
+      figma.clientStorage.setAsync('size', msg.size).catch(err=>{});// save size
+      break;
+  }
+};
+
 // Główny handler wiadomości od UI
-figma.ui.onmessage = async (msg: { type: string; data?: any }) => {
-  if (msg.type === "loadChats") {
+figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number, h: number }}) => {
+  if (msg.type === "resize") {
+    if (msg.size) {
+      figma.ui.resize(msg.size.w, msg.size.h);
+      await figma.clientStorage.setAsync('size', msg.size);
+    }
+  } else if (msg.type === "loadChats") {
     const chats = (await figma.clientStorage.getAsync("chat-history")) || [];
     figma.ui.postMessage({ type: "loadedChats", data: chats });
   } else if (msg.type === "saveChats") {
@@ -126,7 +146,7 @@ figma.ui.onmessage = async (msg: { type: string; data?: any }) => {
       });
 
       console.log("Wysłano zapytanie do Gemini API:", JSON.stringify(requestBody, null, 2));
-      console.log("Odpowiedź API:", response.status, response.statusText);
+      console.log("Odpowiedź API:", response.status);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
