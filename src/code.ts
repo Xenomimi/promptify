@@ -60,7 +60,7 @@ const systemInstruction = {
     - **ZAKAZ:** Nie używaj właściwości tekstowych (font, fs, fw).
 
 **2. Tekst (T):** Element tekstowy.
-    - **Rozmiar:** fill, hug, lub liczba w px.
+    - **Rozmiar:** hug, fill lub liczba w px.
     - **Styl Tekstu:** font:"NazwaCzcionki", fw:[waga] (np. 400, 700), fs:[rozmiar], lh:[%], ls:[num].
     - **Kolor:** fill:[kolor] (użyj tej właściwości do koloru tekstu).
     - **Zawartość:** Tekst do wyświetlenia podaj w cudzysłowie na końcu linii.
@@ -78,35 +78,56 @@ const systemInstruction = {
 2.  **Kontrast i Dostępność:** Zapewnij wysoki kontrast między tłem (fill) a elementami na nim, zwłaszcza tekstem.
 3.  **System Odstępów i Rytm Wizualny:** Stosuj spójne, przewidywalne odstępy (gap, p) oparte na siatce 4px (np. 4, 8, 12, 16, 24, 32). Używaj pustej przestrzeni do grupowania i oddzielania sekcji.
 4.  **Spójność:** Elementy o tej samej funkcji (np. wszystkie przyciski podstawowe) powinny mieć identyczny wygląd (rozmiar, kolor tła, styl tekstu).
-
+5. **Responsywność:** Używaj "fill" i "hug" tam, gdzie to możliwe, aby elementy dostosowywały się do zawartości i rozmiaru ekranu. NIE UŻYWAJ fill dla pierwszego konterea bo jest to nie możliwe. Reszta dzieci konternerów może posiadać hug.
+6. **Margines i Padding:** Używaj paddingu (p) do wewnętrznych odstępów w kontenerach, a marginesów (gap) do odstępów między elementami. Unikaj używania paddingu w elementach tekstowych. Dobrą praktyką jest dodawanie padding podczas tworzenia przycisków.
 ---
 **PRZYKŁAD**
 <design>
 V "Card" hug hug p:24 gap:16 br:12 fill:#2C2C2EFF s:#333333FF sw:1
   T "Title" fill hug font:"Inter" fw:700 fs:18 fill:#EAEAEAFF "Hello World"
   H "Button" hug 44 p:0,20,0,20 a:c j:c gap:8 br:8 fill:#007BFFFF
-    K "Icon" 16 16 fill:#FFFFFFFF "log-in"
+    K "log-in-icon" 16 16 fill:#FFFFFFFF "log-in"
     T "Label" hug hug font:"Inter" fw:600 fs:14 fill:#FFFFFFFF "Sign In"
-</design>`
+</design>
+
+**Implementacja TAJNE**
+Pamiętaj że moje UIComponent moze przyjmowac nastepujace wartosci
+
+interface UIComponent {
+  type: "V" | "H" | "F" | "T" | "S" | "K" | "I";
+  name: string;
+  width: "fill" | "hug" | number;
+  height: "fill" | "hug" | number;
+  children: UIComponent[];
+  fill?: string | { type: "linear"; angle: number; stops: { color: string; position: number }[] };
+  align?: "start" | "center" | "end";
+  justify?: "start" | "center" | "end" | "space-between";
+  gap?: number;
+  padding?: number | [number, number, number, number];
+  borderRadius?: number | [number, number, number, number];
+  stroke?: string;
+  strokeWidth?: number | [number, number, number, number];
+  opacity?: number;
+  blur?: number;
+  shadow?: { offsetX: number; offsetY: number; blur: number; spread: number; color: string; opacity: number };
+  position?: { x: number; y: number };
+  clip?: boolean;
+  text?: string;
+  fontFamily?: string;
+  fontWeight?: number;
+  fontSize?: number;
+  lineHeight?: string;
+  letterSpacing?: number;
+  iconType?: string;
+}
+`
   }]
 };
 
-// restore previous size
 figma.clientStorage.getAsync('size').then(size => {
   if(size) figma.ui.resize(size.w,size.h);
 }).catch(err=>{});
 
-figma.ui.onmessage = msg => {
-  console.log("Received:", msg);
-  switch (msg.type) {
-    case "resize":
-      figma.ui.resize(msg.size.w,msg.size.h);      
-      figma.clientStorage.setAsync('size', msg.size).catch(err=>{});// save size
-      break;
-  }
-};
-
-// Główny handler wiadomości od UI
 figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number, h: number }}) => {
   if (msg.type === "resize") {
     if (msg.size) {
@@ -124,7 +145,6 @@ figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number,
       history: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }>;
     };
 
-    // Dołącz nową wiadomość użytkownika do historii
     const newUserMessage = { role: 'user', parts: [{ text: prompt }] };
     const apiContents = [...history, newUserMessage];
 
@@ -133,7 +153,6 @@ figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number,
         throw new Error("Brak klucza API Gemini. Ustaw zmienną środowiskową API_KEY.");
       }
 
-      // Zawsze dołączaj instrukcję systemową do zapytania
       const requestBody = { 
         contents: apiContents,
         system_instruction: systemInstruction 
@@ -166,6 +185,7 @@ figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number,
         const designContent = designMatch[1].trim();
         if (designContent) {
             const uiComponents = parseUIInstructions(designContent);
+            console.log("Parsed UI components:", uiComponents);
             await generateDesign(uiComponents);
         } else {
             console.warn("Blok <design> w odpowiedzi AI był pusty.");
@@ -178,9 +198,176 @@ figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number,
       const errorMessage = error && error.message ? error.message : "Nieznany błąd";
       figma.ui.postMessage({ type: "response", data: `Wystąpił błąd: ${errorMessage}` });
     }
+  } else if (msg.type === "describeSelection") {
+    const selection = figma.currentPage.selection;
+    if (selection.length === 0) {
+      figma.ui.postMessage({ 
+        type: "response", 
+        data: "Proszę, zaznacz najpierw jakąś warstwę na kanwie Figmy." 
+      });
+      figma.notify("Zaznacz warstwę, aby użyć jej jako kontekst.");
+      return;
+    }
+
+    const dslPromises = selection.map(node => translateNodeToDSL(node));
+    const dslStrings = await Promise.all(dslPromises);
+
+    const fullResponse = `Wersja pobrana z warstwy: \n<design>\n${dslStrings.join('\n---\n')}\n</design>`;
+
+    figma.ui.postMessage({ type: "response", data: fullResponse });
   }
 };
 
+function isIconNode(node: SceneNode): boolean {
+    if (node.name.toLowerCase().includes('icon')) {
+        return true;
+    }
+
+    if (node.type === 'INSTANCE' && node.mainComponent) {
+        if (node.mainComponent.name.toLowerCase().includes('icon')) {
+            return true;
+        }
+        if (node.mainComponent.parent?.type === 'COMPONENT_SET') {
+            if (node.mainComponent.parent.name.toLowerCase().includes('icon')) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function rgbaToHex(color: RGB | RGBA): string {
+    const toHex = (c: number) => Math.round(c * 255).toString(16).padStart(2, '0');
+    // FIX: Zawsze dołączaj kanał alfa, domyślnie 1 (FF)
+    const alpha = 'a' in color ? color.a : 1;
+    return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}${toHex(alpha)}`.toUpperCase();
+}
+
+async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<string> {
+    const indent = "  ".repeat(indentLevel);
+    const props: string[] = [];
+    let type: string;
+    let textContent = "";
+    const isIcon = isIconNode(node);
+
+    // 1. Ustalenie typu węzła
+    if (isIcon) {
+        type = "K";
+    } else if (node.type === "TEXT") {
+        type = "T";
+    } else if (node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE" || node.type === "GROUP") {
+        if ('layoutMode' in node) {
+            switch (node.layoutMode) {
+                case "VERTICAL": type = "V"; break;
+                case "HORIZONTAL": type = "H"; break;
+                default: type = "F";
+            }
+        } else {
+            type = "F"; // GroupNode jest traktowany jako swobodny kontener
+        }
+    } else {
+        type = "K"; // Inne elementy (np. wektory) traktujemy jako ikony
+    }
+
+    const name = `"${node.name}"`;
+
+    // 2. Ulepszona logika ustalania rozmiarów
+    let width: string, height: string;
+    if (node.type === 'TEXT') {
+        // FIX: Używamy textAutoResize dla tekstu
+        switch (node.textAutoResize) {
+            case 'WIDTH_AND_HEIGHT': width = 'hug'; height = 'hug'; break;
+            case 'HEIGHT': width = `${Math.round(node.width)}`; height = 'hug'; break;
+            default: width = `${Math.round(node.width)}`; height = `${Math.round(node.height)}`;
+        }
+    } else {
+        // Domyślne wartości z samego węzła
+        width = 'primaryAxisSizingMode' in node && node.primaryAxisSizingMode === 'AUTO' ? 'hug' : `${Math.round(node.width)}`;
+        height = 'counterAxisSizingMode' in node && node.counterAxisSizingMode === 'AUTO' ? 'hug' : `${Math.round(node.height)}`;
+
+        // FIX: Nadpisanie wartości na podstawie kontekstu rodzica (layoutAlign i layoutGrow)
+        const parent = node.parent;
+        if (parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE' && 'layoutAlign' in node && 'layoutGrow' in node) {
+            if (parent.layoutMode === 'VERTICAL') {
+                if (node.layoutAlign === 'STRETCH') width = 'fill';
+                if (node.layoutGrow === 1) height = 'fill';
+            } else { // HORIZONTAL
+                if (node.layoutGrow === 1) width = 'fill';
+                if (node.layoutAlign === 'STRETCH') height = 'fill';
+            }
+        }
+    }
+
+
+    // 3. Tłumaczenie pozostałych właściwości na DSL
+    if ("layoutMode" in node) {
+        if (node.primaryAxisAlignItems !== 'MIN') {
+            const justifyMap: Record<"CENTER" | "MAX" | "SPACE_BETWEEN", string> = { 'CENTER': 'c', 'MAX': 'e', 'SPACE_BETWEEN': 'b' };
+            if(justifyMap[node.primaryAxisAlignItems as keyof typeof justifyMap]) props.push(`j:${justifyMap[node.primaryAxisAlignItems as keyof typeof justifyMap]}`);
+        }
+        if (node.counterAxisAlignItems !== 'MIN' && node.counterAxisAlignItems !== 'BASELINE') {
+            const alignMap: Record<"CENTER" | "MAX", string> = { 'CENTER': 'c', 'MAX': 'e' };
+            if(alignMap[node.counterAxisAlignItems as keyof typeof alignMap]) props.push(`a:${alignMap[node.counterAxisAlignItems as keyof typeof alignMap]}`);
+        }
+        if (node.itemSpacing > 0) props.push(`gap:${node.itemSpacing}`);
+        if (node.paddingTop > 0 || node.paddingRight > 0 || node.paddingBottom > 0 || node.paddingLeft > 0) {
+            props.push(`p:${node.paddingTop},${node.paddingRight},${node.paddingBottom},${node.paddingLeft}`);
+        }
+    }
+
+    if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
+        const fill = node.fills.find(f => f.visible && f.type === 'SOLID');
+        if (fill && fill.type === 'SOLID') props.push(`fill:${rgbaToHex(fill.color)}`);
+    }
+
+    if ('strokes' in node && node.strokes.length > 0 && 'strokeWeight' in node && typeof node.strokeWeight === 'number') {
+        const stroke = node.strokes[0];
+        if (stroke.type === 'SOLID' && stroke.visible) {
+            props.push(`s:${rgbaToHex(stroke.color)}`);
+            if (node.strokeWeight > 0) props.push(`sw:${node.strokeWeight.toFixed(2)}`);
+        }
+    }
+
+    if ('cornerRadius' in node && typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
+        props.push(`br:${Math.round(node.cornerRadius)}`);
+    }
+
+    if (node.type === "TEXT") {
+        if (node.fontName !== figma.mixed) {
+            await figma.loadFontAsync(node.fontName);
+            if (node.fontName.family !== "Inter") props.push(`font:"${node.fontName.family}"`);
+            // FIX: Ulepszona i bardziej precyzyjna mapa wag
+            const weightMap: { [key: string]: number } = { "Thin": 100, "ExtraLight": 200, "Light": 300, "Regular": 400, "Medium": 500, "SemiBold": 600, "Bold": 700, "ExtraBold": 800, "Black": 900 };
+            const style = node.fontName.style.replace(' ', '');
+            if (weightMap[style] && weightMap[style] !== 400) {
+                props.push(`fw:${weightMap[style]}`);
+            }
+        }
+        if (node.fontSize !== figma.mixed) props.push(`fs:${Math.round(node.fontSize)}`);
+        textContent = ` "${node.characters.replace(/"/g, '\\"')}"`;
+    }
+
+    if (isIcon) {
+        // FIX: Wyodrębnienie nazwy ikony z nazwy węzła
+        const iconName = node.name.toLowerCase().replace('icon', '').trim().replace(' ', '-');
+        textContent = ` "${iconName}"`;
+    }
+    
+    // 4. Złożenie linii DSL
+    let dslLine = `${indent}${type} ${name} ${width} ${height}`;
+    if (props.length > 0) dslLine += ` ${props.join(' ')}`;
+    if (textContent) dslLine += `${textContent}`;
+
+    // 5. Rekurencja dla dzieci (z pominięciem dzieci ikon)
+    // FIX: Zatrzymujemy rekurencję, jeśli węzeł jest ikoną
+    if ("children" in node && !isIcon) {
+        for (const child of node.children) {
+            dslLine += "\n" + await translateNodeToDSL(child, indentLevel + 1);
+        }
+    }
+
+    return dslLine;
+}
 
 function parseColor(color: string): RGBA {
   const hexMatch = color.match(/^#?([A-Fa-f0-9]{6})([A-Fa-f0-9]{2})?$/);
@@ -339,65 +526,53 @@ async function generateDesign(components: UIComponent[]) {
   const nodes: SceneNode[] = [];
 
   async function renderComponent(component: UIComponent, parentNode?: FrameNode): Promise<SceneNode | null> {
+    // Obsługa ikon (K)
     if (component.type === 'K') {
       if (!component.iconType) {
         console.warn('Pominięto ikonę bez nazwy (iconType).');
-        return null; 
+        return null;
       }
-
       const correctedIconName = findClosestIconName(component.iconType.toLowerCase());
       const iconUrl = `https://cdn.jsdelivr.net/npm/lucide-static/icons/${correctedIconName}.svg`;
-
       try {
         const response = await fetch(iconUrl);
-        if (!response.ok) {
-          throw new Error(`Nie znaleziono ikony: ${correctedIconName}`);
-        }
-
+        if (!response.ok) throw new Error(`Nie znaleziono ikony: ${correctedIconName}`);
         const svgContent = await response.text();
-        console.log(`svgContent: ${svgContent}`)
         const node = figma.createNodeFromSvg(svgContent);
-        
         node.name = component.name || component.iconType;
-
+        if (!node.name.toLowerCase().includes('icon')) node.name = `${node.name}Icon`;
         const width = typeof component.width === 'number' ? component.width : 24;
         const height = typeof component.height === 'number' ? component.height : 24;
         node.resize(width, height);
-
         if (component.fill && typeof component.fill === 'string') {
           const { r, g, b, a } = parseColor(component.fill);
-
           for (const child of node.children) {
             if (child.type === 'VECTOR') {
               child.fills = [];
-              child.strokes = [{ type: 'SOLID', color: { r, g, b }, opacity: a}];
+              child.strokes = [{ type: 'SOLID', color: { r, g, b }, opacity: a }];
               child.strokeWeight = 1.67;
             }
           }
-          console.log(`Ustawiono kolor wypełnienia ikony: ${component.fill}`);
         }
-        
         if (component.opacity !== undefined) node.opacity = component.opacity;
         if (component.position) {
-            node.layoutPositioning = 'ABSOLUTE';
-            node.x = component.position.x;
-            node.y = component.position.y;
+          node.layoutPositioning = 'ABSOLUTE';
+          node.x = component.position.x;
+          node.y = component.position.y;
         }
-         if (parentNode && parentNode.layoutMode !== 'NONE') {
-            const isParentVertical = parentNode.layoutMode === 'VERTICAL';
-            if (isParentVertical) {
-                node.layoutAlign = component.width === 'fill' ? 'STRETCH' : 'INHERIT';
-                node.layoutGrow = component.height === 'fill' ? 1 : 0;
-            } else {
-                node.layoutAlign = component.height === 'fill' ? 'STRETCH' : 'INHERIT';
-                node.layoutGrow = component.width === 'fill' ? 1 : 0;
-            }
+        if (parentNode && parentNode.layoutMode !== 'NONE') {
+          const isParentVertical = parentNode.layoutMode === 'VERTICAL';
+          if (isParentVertical) {
+            node.layoutAlign = component.width === 'fill' ? 'STRETCH' : 'INHERIT';
+            node.layoutGrow = component.height === 'fill' ? 1 : 0;
+          } else {
+            node.layoutAlign = component.height === 'fill' ? 'STRETCH' : 'INHERIT';
+            node.layoutGrow = component.width === 'fill' ? 1 : 0;
+          }
         }
         return node;
-
       } catch (error: any) {
         console.error(`Błąd ładowania ikony: ${error.message}. Tworzę placeholder.`);
-        console.log(`Payload: ${iconUrl}`)
         const fallbackNode = figma.createFrame();
         fallbackNode.name = `(Błąd) ${component.name}`;
         const size = typeof component.width === 'number' ? component.width : 24;
@@ -407,57 +582,62 @@ async function generateDesign(components: UIComponent[]) {
     }
 
     let node: FrameNode | TextNode;
-
     if (component.type === "T") {
       node = figma.createText();
     } else {
       node = figma.createFrame();
-    }
-    node.name = component.name;
-    
-    const hasNumericWidth = typeof component.width === 'number';
-    const hasNumericHeight = typeof component.height === 'number';
-    if(hasNumericWidth || hasNumericHeight) {
-        node.resize(
-            hasNumericWidth ? component.width as number : (node.width || 100),
-            hasNumericHeight ? component.height as number : (node.height || 100)
-        );
-    }
-    
-    if (parentNode && parentNode.layoutMode !== 'NONE') {
-      const isParentVertical = parentNode.layoutMode === 'VERTICAL';
-      if (isParentVertical) {
-        node.layoutAlign = component.width === 'fill' ? 'STRETCH' : 'INHERIT';
-        node.layoutGrow = component.height === 'fill' ? 1 : 0;
-      } else {
-        node.layoutAlign = component.height === 'fill' ? 'STRETCH' : 'INHERIT';
-        node.layoutGrow = component.width === 'fill' ? 1 : 0;
-      }
-    }
-
-    if (component.opacity !== undefined) node.opacity = component.opacity;
-    if (component.position) {
-        node.layoutPositioning = 'ABSOLUTE';
-        node.x = component.position.x;
-        node.y = component.position.y;
-    }
-
-    if (node.type === 'FRAME') {
       if (component.type === "V" || component.type === "H") {
         node.layoutMode = component.type === "V" ? "VERTICAL" : "HORIZONTAL";
-        node.primaryAxisSizingMode = 'AUTO';
-        node.counterAxisSizingMode = 'AUTO';
+        if (component.type === "V") {
+          node.primaryAxisSizingMode = component.height === 'hug' ? 'AUTO' : 'FIXED';
+          node.counterAxisSizingMode = component.width === 'hug' ? 'AUTO' : 'FIXED';
+        } else {
+          node.primaryAxisSizingMode = component.width === 'hug' ? 'AUTO' : 'FIXED';
+          node.counterAxisSizingMode = component.height === 'hug' ? 'AUTO' : 'FIXED';
+        }
         node.itemSpacing = component.gap || 0;
         if (component.justify) node.primaryAxisAlignItems = component.justify === 'start' ? 'MIN' : component.justify === 'center' ? 'CENTER' : component.justify === 'end' ? 'MAX' : 'SPACE_BETWEEN';
         if (component.align) node.counterAxisAlignItems = component.align === 'start' ? 'MIN' : component.align === 'center' ? 'CENTER' : 'MAX';
+      } else {
+        node.layoutSizingHorizontal = component.width === 'hug' ? 'HUG' : 'FIXED';
+        node.layoutSizingVertical = component.height === 'hug' ? 'HUG' : 'FIXED';
       }
+    }
 
+    node.name = component.name;
+
+    const hasNumericWidth = typeof component.width === 'number';
+    const hasNumericHeight = typeof component.height === 'number';
+
+    console.log(`Name: ${node.name}, Type: ${node.type}, Width: ${component.width}, Height: ${component.height}`);
+    console.log(`Has numeric width: ${hasNumericWidth}, Has numeric height: ${hasNumericHeight}`);
+
+    if (hasNumericWidth || hasNumericHeight) {
+      const currentWidth = hasNumericWidth ? (component.width as number) : node.width;
+      const currentHeight = hasNumericHeight ? (component.height as number) : node.height;
+      node.resize(currentWidth, currentHeight);
+    }
+
+    console.log(`Node resized to: ${node.width}x${node.height}`);
+
+    if (parentNode && parentNode.layoutMode !== 'NONE') {
+      const isParentVertical = parentNode.layoutMode === 'VERTICAL';
+      if (isParentVertical) {
+        if (component.width === 'fill') node.layoutAlign = 'STRETCH';
+        if (component.height === 'fill') node.layoutGrow = 1;
+      } else {
+        if (component.height === 'fill') node.layoutAlign = 'STRETCH';
+        if (component.width === 'fill') node.layoutGrow = 1;
+      }
+    }
+
+    if (node.type === 'FRAME') {
       if (component.fill) {
         if (typeof component.fill === "string") {
           const { r, g, b, a } = parseColor(component.fill);
           node.fills = [{ type: "SOLID", color: { r, g, b }, opacity: a }];
         } else if (component.fill.type === "linear") {
-           node.fills = [{
+          node.fills = [{
             type: "GRADIENT_LINEAR",
             gradientTransform: [[Math.cos(component.fill.angle * Math.PI / 180), Math.sin(component.fill.angle * Math.PI / 180), 0], [-Math.sin(component.fill.angle * Math.PI / 180), Math.cos(component.fill.angle * Math.PI / 180), 0]],
             gradientStops: component.fill.stops.map(stop => ({ color: parseColor(stop.color), position: stop.position })),
@@ -470,30 +650,26 @@ async function generateDesign(components: UIComponent[]) {
       if (component.stroke) {
         const { r, g, b, a } = parseColor(component.stroke);
         node.strokes = [{ type: 'SOLID', color: { r, g, b }, opacity: a }];
-        if (typeof component.strokeWidth === 'number') {
-            node.strokeWeight = component.strokeWidth;
-        } else if (Array.isArray(component.strokeWidth)) {
-            node.strokeTopWeight = component.strokeWidth[0];
-            node.strokeRightWeight = component.strokeWidth[1];
-            node.strokeBottomWeight = component.strokeWidth[2];
-            node.strokeLeftWeight = component.strokeWidth[3];
+        if (typeof component.strokeWidth === 'number') node.strokeWeight = component.strokeWidth;
+        else if (Array.isArray(component.strokeWidth)) {
+          node.strokeTopWeight = component.strokeWidth[0];
+          node.strokeRightWeight = component.strokeWidth[1];
+          node.strokeBottomWeight = component.strokeWidth[2];
+          node.strokeLeftWeight = component.strokeWidth[3];
         }
       }
-      
-      if (component.clip) node.clipsContent = true;
 
-      if (typeof component.padding === 'number') {
-        node.paddingLeft = node.paddingRight = node.paddingTop = node.paddingBottom = component.padding;
-      } else if (Array.isArray(component.padding)) {
+      if (component.clip) node.clipsContent = true;
+      if (typeof component.padding === 'number') node.paddingLeft = node.paddingRight = node.paddingTop = node.paddingBottom = component.padding;
+      else if (Array.isArray(component.padding)) {
         node.paddingTop = component.padding[0];
         node.paddingRight = component.padding[1];
         node.paddingBottom = component.padding[2];
         node.paddingLeft = component.padding[3];
       }
-      
-      if (typeof component.borderRadius === 'number') {
-        node.cornerRadius = component.borderRadius;
-      } else if (Array.isArray(component.borderRadius)) {
+
+      if (typeof component.borderRadius === 'number') node.cornerRadius = component.borderRadius;
+      else if (Array.isArray(component.borderRadius)) {
         node.topLeftRadius = component.borderRadius[0];
         node.topRightRadius = component.borderRadius[1];
         node.bottomRightRadius = component.borderRadius[2];
@@ -502,39 +678,51 @@ async function generateDesign(components: UIComponent[]) {
     }
 
     if (node.type === 'TEXT') {
-        if (typeof component.fill === 'string') {
-            const { r, g, b, a } = parseColor(component.fill);
-            node.fills = [{ type: "SOLID", color: { r, g, b }, opacity: a }];
-        }
-        const fontNameValue = component.fontFamily || "Inter";
-        const fontWeight = component.fontWeight || 400;
-        const styleMatch = (await figma.listAvailableFontsAsync()).find(font => font.fontName.family === fontNameValue);
-        const fontStyle = fontWeight >= 600 ? "Bold" : fontWeight >= 500 ? "Medium" : "Regular";
-        
-        await figma.loadFontAsync({ family: fontNameValue, style: fontStyle });
-        node.fontName = { family: fontNameValue, style: fontStyle };
-        if (component.fontSize) node.fontSize = component.fontSize;
-        if (component.letterSpacing) node.letterSpacing = { value: component.letterSpacing, unit: "PIXELS" };
-        if (component.lineHeight) node.lineHeight = { value: parseFloat(component.lineHeight), unit: "PERCENT" };
-        node.characters = component.text || "";
+      if (typeof component.fill === 'string') {
+        const { r, g, b, a } = parseColor(component.fill);
+        node.fills = [{ type: "SOLID", color: { r, g, b }, opacity: a }];
+      }
+
+      const fontNameValue = component.fontFamily || "Inter";
+      const fontWeight = component.fontWeight || 400;
+      const fontStyle = fontWeight >= 600 ? "Bold" : fontWeight >= 500 ? "Medium" : "Regular";
+
+      await figma.loadFontAsync({ family: fontNameValue, style: fontStyle });
+      node.fontName = { family: fontNameValue, style: fontStyle };
+      if (component.width === 'hug') {
+        node.textAutoResize = 'WIDTH_AND_HEIGHT';
+      } else {
+        node.textAutoResize = 'HEIGHT';
+      }
+
+      if (typeof component.width === 'number' && typeof component.height === 'number') {
+          node.textAutoResize = 'NONE';
+      }
+
+      if (component.fontSize) node.fontSize = component.fontSize;
+      if (component.letterSpacing) node.letterSpacing = { value: component.letterSpacing, unit: "PIXELS" };
+      if (component.lineHeight) node.lineHeight = { value: parseFloat(component.lineHeight), unit: "PERCENT" };
+      node.characters = component.text || "";
     }
-    
+
     const effects: Effect[] = [];
-    if (component.blur) {
-      effects.push({ type: 'LAYER_BLUR', blurType: 'NORMAL', radius: component.blur, visible: true });
-    }
-    if (component.shadow) {
-        effects.push({ type: 'DROP_SHADOW', color: { ...parseColor(component.shadow.color), a: component.shadow.opacity }, offset: { x: component.shadow.offsetX, y: component.shadow.offsetY }, radius: component.shadow.blur, spread: component.shadow.spread, blendMode: 'NORMAL', visible: true });
-    }
+    if (component.blur) effects.push({ type: 'LAYER_BLUR', blurType: 'NORMAL', radius: component.blur, visible: true });
+    if (component.shadow) effects.push({
+      type: 'DROP_SHADOW',
+      color: { ...parseColor(component.shadow.color), a: component.shadow.opacity },
+      offset: { x: component.shadow.offsetX, y: component.shadow.offsetY },
+      radius: component.shadow.blur,
+      spread: component.shadow.spread,
+      blendMode: 'NORMAL',
+      visible: true
+    });
     if (effects.length > 0) node.effects = effects;
 
-    if (node.type === 'FRAME') {
-        for (const childComponent of component.children) {
-            const childNode = await renderComponent(childComponent, node);
-            if (childNode) {
-              node.appendChild(childNode);
-            }
-        }
+    if (node.type === 'FRAME' && Array.isArray(component.children)) {
+      for (const childComponent of component.children) {
+        const childNode = await renderComponent(childComponent, node);
+        if (childNode) node.appendChild(childNode);
+      }
     }
     return node;
   }
@@ -545,9 +733,9 @@ async function generateDesign(components: UIComponent[]) {
     if (node) {
       figma.currentPage.appendChild(node);
       nodes.push(node);
-      if(!component.position) {
-          node.y = yPos;
-          yPos += node.height + 20;
+      if (!component.position) {
+        node.y = yPos;
+        yPos += node.height + 20;
       }
     }
   }

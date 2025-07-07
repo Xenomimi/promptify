@@ -38,7 +38,7 @@
 
         /* --- Sidebar --- */
         #sidebar {
-            width: 30%;
+            width: 200px;
             background: #ffffff;
             padding: 16px;
             border-right: 1px solid #e5e5ea;
@@ -202,6 +202,7 @@
             border-top: 1px solid #e5e5ea;
             background-color: #f8f8f8;
             margin-block-end: auto;
+            align-items: flex-end; /* Ważne, by przyciski były na dole, gdy textarea rośnie */
         }
 
         #prompt-input {
@@ -212,12 +213,40 @@
             resize: none;
             font-size: 14px;
             line-height: 1.4;
-            margin-right: 10px;
+            margin-right: 8px; /* Zmniejszony margines */
         }
 
         #prompt-input:focus {
             outline: none;
             border-color: #007aff;
+        }
+
+        #context-button {
+            background-color: #f0f2f5;
+            border: 1px solid #c7c7cc;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-right: 8px;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+
+        #context-button:hover {
+            background-color: #e5e5ea;
+        }
+
+        #context-button.active {
+            background-color: #d1e7ff; /* Jasnoniebieskie tło dla aktywnego stanu */
+            border-color: #007aff;
+        }
+
+        #context-button.active svg path {
+            stroke: #007aff;
         }
 
         #send-button {
@@ -254,6 +283,11 @@
                 </div>
             </div>
             <form id="input-form">
+                <button id="context-button" type="button" title="Użyj zaznaczonego elementu jako kontekst">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M5 15V8.28571C5 7.02336 5 6.39219 5.21799 5.89901C5.40973 5.47487 5.72487 5.16014 6.12817 4.98623C6.59421 4.78571 7.16519 4.78571 8.30714 4.78571H15.7143C16.9766 4.78571 17.6078 4.78571 18.101 5.0037C18.5251 5.19544 18.8399 5.51017 19.0138 5.91347C19.2143 6.37951 19.2143 6.95049 19.2143 8.09244V15.7143C19.2143 16.9766 19.2143 17.6078 19.0138 18.101C18.8399 18.5251 18.5251 18.8399 18.101 19.0138C17.6078 19.2143 16.9766 19.2143 15.7143 19.2143H8.30714C7.16519 19.2143 6.59421 19.2143 6.12817 19.0138C5.72487 18.8399 5.40973 18.5251 5.21799 18.101C5 17.6078 5 16.9766 5 15.7143V15Z" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
                 <textarea id="prompt-input" rows="1" placeholder="Opisz swój design..."></textarea>
                 <button id="send-button" type="submit">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -273,10 +307,12 @@
     <script>
         const form = document.getElementById('input-form');
         const input = document.getElementById('prompt-input');
+        const contextButton = document.getElementById('context-button');
         const messagesContainer = document.getElementById('messages-container');
         let currentChatId = null;
         let chats = [];
         let editingChatId = null;
+        let isContextModeActive = false;
 
         window.addEventListener('message', (event) => {
             if (event.data.pluginMessage) {
@@ -284,10 +320,34 @@
                 if (msg.type === 'loadedChats') {
                     chats = msg.data || [];
                     renderChatList();
+                    if (chats.length > 0 && !currentChatId) {
+                        loadChat(chats[0].id);
+                    } else if (chats.length === 0) {
+                        startNewChat();
+                    }                    
                 } else if (msg.type === 'response') {
                     hideLoader();
                     addMessage(msg.data, 'bot');
+                } else if (msg.type === 'describedSelection') {
+                    if (msg.data) {
+                        input.value = msg.data;
+                        input.style.height = 'auto';
+                        input.style.height = (input.scrollHeight) + 'px';
+                        input.focus();
+                    }
+                    isContextModeActive = false;
+                    contextButton.classList.remove('active');
                 }
+            }
+        });
+
+        contextButton.addEventListener('click', () => {
+            isContextModeActive = !isContextModeActive;
+            contextButton.classList.toggle('active', isContextModeActive);
+
+            if (isContextModeActive) {
+                // Poproś wtyczkę o opisanie zaznaczonego elementu
+                parent.postMessage({ pluginMessage: { type: 'describeSelection' } }, '*');
             }
         });
 
@@ -483,12 +543,27 @@
             renderChatList();
         }
 
-        function startNewChat() {
-            currentChatId = null;
+        async function startNewChat() {
+            // Sprawdź, czy obecny czat jest już nowy i pusty, aby uniknąć tworzenia wielu pustych czatów
+            const currentActiveChat = chats.find(c => c.id === currentChatId);
+            if (currentActiveChat && currentActiveChat.name === 'Nowy czat' && currentActiveChat.messages.length === 0) {
+                return; // Już jesteś w nowym, pustym czacie
+            }
+
             editingChatId = null;
-            messagesContainer.innerHTML = '';
-            renderMessage('Cześć! Opisz design, który chcesz stworzyć, a ja postaram się go dla Ciebie wygenerować.', 'bot');
-            renderChatList();
+            const newId = createChatId();
+            const newChat = { 
+                id: newId, 
+                name: 'Nowy czat', 
+                messages: [] 
+            };
+
+            // Dodaj nowy czat na początek listy
+            chats.unshift(newChat);
+            await saveChats(chats);
+            
+            // Wczytaj nowo utworzony czat, aby go wyświetlić i aktywować
+            await loadChat(newId);
         }
 
         function startEditingChat(id) {
@@ -528,7 +603,6 @@
             w: Math.max(50,Math.floor(e.clientX+5)),
             h: Math.max(50,Math.floor(e.clientY+5))
             };
-            console.log("Resizing to:", size);
             parent.postMessage( { pluginMessage: { type: 'resize', size: size }}, '*');
         }
         corner.onpointerdown = (e)=>{
