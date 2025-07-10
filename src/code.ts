@@ -271,27 +271,23 @@ async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<str
 
     const name = `"${node.name}"`;
 
-    // 2. Ulepszona logika ustalania rozmiarów
     let width: string, height: string;
     if (node.type === 'TEXT') {
-        // FIX: Używamy textAutoResize dla tekstu
         switch (node.textAutoResize) {
             case 'WIDTH_AND_HEIGHT': width = 'hug'; height = 'hug'; break;
             case 'HEIGHT': width = `${Math.round(node.width)}`; height = 'hug'; break;
             default: width = `${Math.round(node.width)}`; height = `${Math.round(node.height)}`;
         }
     } else {
-        // Domyślne wartości z samego węzła
         width = 'primaryAxisSizingMode' in node && node.primaryAxisSizingMode === 'AUTO' ? 'hug' : `${Math.round(node.width)}`;
         height = 'counterAxisSizingMode' in node && node.counterAxisSizingMode === 'AUTO' ? 'hug' : `${Math.round(node.height)}`;
 
-        // FIX: Nadpisanie wartości na podstawie kontekstu rodzica (layoutAlign i layoutGrow)
         const parent = node.parent;
         if (parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE' && 'layoutAlign' in node && 'layoutGrow' in node) {
             if (parent.layoutMode === 'VERTICAL') {
                 if (node.layoutAlign === 'STRETCH') width = 'fill';
                 if (node.layoutGrow === 1) height = 'fill';
-            } else { // HORIZONTAL
+            } else {
                 if (node.layoutGrow === 1) width = 'fill';
                 if (node.layoutAlign === 'STRETCH') height = 'fill';
             }
@@ -299,7 +295,6 @@ async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<str
     }
 
 
-    // 3. Tłumaczenie pozostałych właściwości na DSL
     if ("layoutMode" in node) {
         if (node.primaryAxisAlignItems !== 'MIN') {
             const justifyMap: Record<"CENTER" | "MAX" | "SPACE_BETWEEN", string> = { 'CENTER': 'c', 'MAX': 'e', 'SPACE_BETWEEN': 'b' };
@@ -690,13 +685,14 @@ async function generateDesign(components: UIComponent[]) {
       await figma.loadFontAsync({ family: fontNameValue, style: fontStyle });
       node.fontName = { family: fontNameValue, style: fontStyle };
       if (component.width === 'hug') {
-        node.textAutoResize = 'WIDTH_AND_HEIGHT';
-      } else {
-        node.textAutoResize = 'HEIGHT';
-      }
-
-      if (typeof component.width === 'number' && typeof component.height === 'number') {
+          node.textAutoResize = 'WIDTH_AND_HEIGHT';
+      } else if (typeof component.width === 'number' && component.width <= 0) {
+          node.textAutoResize = 'WIDTH_AND_HEIGHT';
+      } else if (typeof component.width === 'number' && typeof component.height === 'number') {
           node.textAutoResize = 'NONE';
+          node.resize(Math.max(component.width, 1), component.height);
+      } else {
+          node.textAutoResize = 'HEIGHT';
       }
 
       if (component.fontSize) node.fontSize = component.fontSize;
