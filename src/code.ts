@@ -3,7 +3,6 @@ import icons from "../icons.json";
 figma.showUI(__html__, { width: 1000, height: 600 });
 
 const GEMINI_API_KEY = process.env.API_KEY;
-const GEMINI_API_URL = process.env.API_URL;
 const LUCIDE_ICON_NAMES = icons;
 
 interface GeminiResponse {
@@ -71,16 +70,15 @@ const systemInstruction = {
     - **Kolor:** fill:[kolor].
     - **Nazwa:** Na końcu linii podaj oficjalną nazwę ikony (kebab-case) w cudzysłowie, np. "arrow-right", "user".
 
----
-**DOBRE PRAKTYKI PROJEKTOWE (STOSUJ ZAWSZE)**
 
+**DOBRE PRAKTYKI PROJEKTOWE (STOSUJ ZAWSZE)**
 1.  **Typografia:** Domyślnie używaj font:"Inter". Waga 400 (Regular) dla treści, 600 (SemiBold) dla ważnych etykiet i nagłówków, 700 (Bold) dla głównych nagłówków.
 2.  **Kontrast i Dostępność:** Zapewnij wysoki kontrast między tłem (fill) a elementami na nim, zwłaszcza tekstem.
 3.  **System Odstępów i Rytm Wizualny:** Stosuj spójne, przewidywalne odstępy (gap, p) oparte na siatce 4px (np. 4, 8, 12, 16, 24, 32). Używaj pustej przestrzeni do grupowania i oddzielania sekcji.
 4.  **Spójność:** Elementy o tej samej funkcji (np. wszystkie przyciski podstawowe) powinny mieć identyczny wygląd (rozmiar, kolor tła, styl tekstu).
-5. **Responsywność:** Używaj "fill" i "hug" tam, gdzie to możliwe, aby elementy dostosowywały się do zawartości i rozmiaru ekranu. NIE UŻYWAJ fill dla pierwszego konterea bo jest to nie możliwe. Reszta dzieci konternerów może posiadać hug.
-6. **Margines i Padding:** Używaj paddingu (p) do wewnętrznych odstępów w kontenerach, a marginesów (gap) do odstępów między elementami. Unikaj używania paddingu w elementach tekstowych. Dobrą praktyką jest dodawanie padding podczas tworzenia przycisków.
----
+5.  **Responsywność:** Używaj "fill" i "hug" tam, gdzie to możliwe, aby elementy dostosowywały się do zawartości i rozmiaru ekranu. NIE UŻYWAJ fill dla pierwszego konterea bo jest to nie możliwe. Reszta dzieci konternerów może posiadać hug.
+6.  **Margines i Padding:** Używaj paddingu (p) do wewnętrznych odstępów w kontenerach, a marginesów (gap) do odstępów między elementami. Unikaj używania paddingu w elementach tekstowych. Dobrą praktyką jest dodawanie padding podczas tworzenia przycisków.
+
 **PRZYKŁAD**
 <design>
 V "Card" hug hug p:24 gap:16 br:12 fill:#2C2C2EFF s:#333333FF sw:1
@@ -124,9 +122,19 @@ interface UIComponent {
   }]
 };
 
+let currentModelId: string = 'gemini-2.5-flash';
+
 figma.clientStorage.getAsync('size').then(size => {
   if(size) figma.ui.resize(size.w,size.h);
 }).catch(err=>{});
+
+figma.clientStorage.getAsync('selectedModel').then(savedModel => {
+    if (savedModel) {
+        currentModelId = savedModel;
+        console.log(`Wczytano zapisany model: ${currentModelId}`);
+        figma.ui.postMessage({ type: 'syncModel', data: currentModelId });
+    }
+});
 
 figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number, h: number }}) => {
   if (msg.type === "resize") {
@@ -158,13 +166,13 @@ figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number,
         system_instruction: systemInstruction 
       };
 
-      const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModelId}:generateContent?key=${GEMINI_API_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody)
       });
 
-      console.log("Wysłano zapytanie do Gemini API:", JSON.stringify(requestBody, null, 2));
+      console.log(`Wysłano zapytanie do Gemini API (${currentModelId}):`, JSON.stringify(requestBody, null, 2));
       console.log("Odpowiedź API:", response.status);
 
       if (!response.ok) {
@@ -215,7 +223,14 @@ figma.ui.onmessage = async (msg: { type: string; data?: any, size?: { w: number,
     const fullResponse = `Wersja pobrana z warstwy: \n<design>\n${dslStrings.join('\n---\n')}\n</design>`;
 
     figma.ui.postMessage({ type: "response", data: fullResponse });
-  }
+  } else if (msg.type === 'modelChanged') {
+    if (typeof msg.data === 'string') {
+        currentModelId = msg.data;
+        await figma.clientStorage.setAsync('selectedModel', currentModelId);
+        figma.notify(`Zmieniono model na: ${currentModelId}`);
+        console.log(`Model został zmieniony i zapisany: ${currentModelId}`);
+      }
+    }
 };
 
 function isIconNode(node: SceneNode): boolean {
@@ -238,7 +253,6 @@ function isIconNode(node: SceneNode): boolean {
 
 function rgbaToHex(color: RGB | RGBA): string {
     const toHex = (c: number) => Math.round(c * 255).toString(16).padStart(2, '0');
-    // FIX: Zawsze dołączaj kanał alfa, domyślnie 1 (FF)
     const alpha = 'a' in color ? color.a : 1;
     return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}${toHex(alpha)}`.toUpperCase();
 }
@@ -250,7 +264,6 @@ async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<str
     let textContent = "";
     const isIcon = isIconNode(node);
 
-    // 1. Ustalenie typu węzła
     if (isIcon) {
         type = "K";
     } else if (node.type === "TEXT") {
@@ -263,10 +276,10 @@ async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<str
                 default: type = "F";
             }
         } else {
-            type = "F"; // GroupNode jest traktowany jako swobodny kontener
+            type = "F";
         }
     } else {
-        type = "K"; // Inne elementy (np. wektory) traktujemy jako ikony
+        type = "K";
     }
 
     const name = `"${node.name}"`;
@@ -331,7 +344,6 @@ async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<str
         if (node.fontName !== figma.mixed) {
             await figma.loadFontAsync(node.fontName);
             if (node.fontName.family !== "Inter") props.push(`font:"${node.fontName.family}"`);
-            // FIX: Ulepszona i bardziej precyzyjna mapa wag
             const weightMap: { [key: string]: number } = { "Thin": 100, "ExtraLight": 200, "Light": 300, "Regular": 400, "Medium": 500, "SemiBold": 600, "Bold": 700, "ExtraBold": 800, "Black": 900 };
             const style = node.fontName.style.replace(' ', '');
             if (weightMap[style] && weightMap[style] !== 400) {
@@ -343,24 +355,18 @@ async function translateNodeToDSL(node: SceneNode, indentLevel = 0): Promise<str
     }
 
     if (isIcon) {
-        // FIX: Wyodrębnienie nazwy ikony z nazwy węzła
         const iconName = node.name.toLowerCase().replace('icon', '').trim().replace(' ', '-');
         textContent = ` "${iconName}"`;
     }
     
-    // 4. Złożenie linii DSL
     let dslLine = `${indent}${type} ${name} ${width} ${height}`;
     if (props.length > 0) dslLine += ` ${props.join(' ')}`;
     if (textContent) dslLine += `${textContent}`;
-
-    // 5. Rekurencja dla dzieci (z pominięciem dzieci ikon)
-    // FIX: Zatrzymujemy rekurencję, jeśli węzeł jest ikoną
     if ("children" in node && !isIcon) {
         for (const child of node.children) {
             dslLine += "\n" + await translateNodeToDSL(child, indentLevel + 1);
         }
     }
-
     return dslLine;
 }
 
@@ -521,7 +527,6 @@ async function generateDesign(components: UIComponent[]) {
   const nodes: SceneNode[] = [];
 
   async function renderComponent(component: UIComponent, parentNode?: FrameNode): Promise<SceneNode | null> {
-    // Obsługa ikon (K)
     if (component.type === 'K') {
       if (!component.iconType) {
         console.warn('Pominięto ikonę bez nazwy (iconType).');
@@ -684,13 +689,18 @@ async function generateDesign(components: UIComponent[]) {
 
       await figma.loadFontAsync({ family: fontNameValue, style: fontStyle });
       node.fontName = { family: fontNameValue, style: fontStyle };
+      
+      node.characters = component.text || "";
       if (component.width === 'hug') {
           node.textAutoResize = 'WIDTH_AND_HEIGHT';
-      } else if (typeof component.width === 'number' && component.width <= 0) {
-          node.textAutoResize = 'WIDTH_AND_HEIGHT';
-      } else if (typeof component.width === 'number' && typeof component.height === 'number') {
-          node.textAutoResize = 'NONE';
-          node.resize(Math.max(component.width, 1), component.height);
+      } else if (typeof component.width === 'number' && component.width > 0) {
+          if (typeof component.height === 'number' && component.height > 0) {
+              node.textAutoResize = 'NONE';
+              node.resize(component.width, component.height);
+          } else {
+              node.textAutoResize = 'HEIGHT';
+              node.resize(component.width, node.height);
+          }
       } else {
           node.textAutoResize = 'HEIGHT';
       }
@@ -698,7 +708,6 @@ async function generateDesign(components: UIComponent[]) {
       if (component.fontSize) node.fontSize = component.fontSize;
       if (component.letterSpacing) node.letterSpacing = { value: component.letterSpacing, unit: "PIXELS" };
       if (component.lineHeight) node.lineHeight = { value: parseFloat(component.lineHeight), unit: "PERCENT" };
-      node.characters = component.text || "";
     }
 
     const effects: Effect[] = [];
